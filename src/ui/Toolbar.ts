@@ -20,6 +20,11 @@ export function effortOptions(models: ModelInfo[], model: string | null): Effort
   return info?.supportedEffortLevels?.length ? info.supportedEffortLevels : EFFORT_LEVELS;
 }
 
+/** 새 모델이 이 선택값을 지원하면 그대로, 아니면 undefined(선택 해제)를 돌려준다. */
+export function keepEffort(levels: EffortLevel[], selected: string): EffortLevel | undefined {
+  return selected && levels.includes(selected as EffortLevel) ? (selected as EffortLevel) : undefined;
+}
+
 export function modeOptions(current: string | null): { value: string; label: string }[] {
   const values: string[] = [...MODE_ORDER];
   if (current && !values.includes(current)) values.push(current);
@@ -49,7 +54,9 @@ export class Toolbar {
     this.contextEl = row.createSpan({ cls: 'cp-context', attr: { 'aria-label': '컨텍스트 사용률' } });
     this.modelSel.addEventListener('change', () => {
       h.onModel(this.modelSel.value || undefined);
-      this.renderEfforts(this.effortSel.value);
+      const before = this.effortSel.value;
+      const kept = this.renderEfforts(before);
+      if (before && !kept) h.onEffort(undefined);
     });
     this.effortSel.addEventListener('change', () => h.onEffort((this.effortSel.value || undefined) as EffortLevel | undefined));
     this.modeSel.addEventListener('change', () => {
@@ -104,13 +111,15 @@ export class Toolbar {
     sel.value = selected;
   }
 
-  private renderEfforts(selected: string): void {
+  private renderEfforts(selected: string): EffortLevel | undefined {
     const levels = effortOptions(this.models, this.modelSel.value || this.resolvedModel);
     const sel = this.effortSel;
     sel.empty();
     sel.createEl('option', { value: '', text: '추론 기본' });
     for (const level of levels) sel.createEl('option', { value: level, text: `추론 ${level}` });
-    sel.value = levels.includes(selected as EffortLevel) ? selected : '';
+    const kept = keepEffort(levels, selected);
+    sel.value = kept ?? '';
     sel.toggle(levels.length > 0);
+    return kept;
   }
 }

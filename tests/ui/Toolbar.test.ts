@@ -1,6 +1,6 @@
 import type { ModelInfo } from '@anthropic-ai/claude-agent-sdk';
 import { describe, expect, it } from 'vitest';
-import { EFFORT_LEVELS, effortOptions, modeOptions, nextMode } from '../../src/ui/Toolbar';
+import { EFFORT_LEVELS, effortOptions, keepEffort, modeOptions, nextMode } from '../../src/ui/Toolbar';
 
 const models: ModelInfo[] = [
   { value: 'opus', displayName: 'Opus', description: '', resolvedModel: 'claude-opus-5', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
@@ -27,6 +27,21 @@ describe('effortOptions', () => {
     expect(effortOptions(models, 'claude-opus-5')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
     expect(effortOptions(models, 'haiku')).toEqual([]);
     expect(effortOptions([], null)).toEqual(EFFORT_LEVELS);
+  });
+});
+
+describe('keepEffort', () => {
+  it('새 모델이 지원하는 선택값은 그대로 유지한다', () => {
+    expect(keepEffort(['low', 'medium', 'high'], 'medium')).toBe('medium');
+  });
+  it('새 모델이 지원하지 않는 선택값은 해제한다', () => {
+    expect(keepEffort(['low', 'medium', 'high'], 'xhigh')).toBeUndefined();
+  });
+  it('지원 단계가 없으면(효과 미지원) 해제한다', () => {
+    expect(keepEffort([], 'high')).toBeUndefined();
+  });
+  it('애초에 선택값이 없으면(빈 문자열) 해제 상태를 유지한다', () => {
+    expect(keepEffort(['low', 'medium', 'high'], '')).toBeUndefined();
   });
 });
 
