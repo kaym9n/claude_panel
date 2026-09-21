@@ -37,3 +37,12 @@
 .cp-composer { position: relative; border-top: 1px solid var(--background-modifier-border); padding: 6px 10px 10px; }
 .cp-input { width: 100%; resize: none; min-height: 60px; }
 .cp-composer-bar { display: flex; justify-content: flex-end; margin-top: 4px; }
+.cp-ask { margin: 6px 0; }
+.cp-ask-header { font-size: var(--font-ui-smaller); color: var(--text-accent); border: 1px solid var(--text-accent); border-radius: var(--radius-s); padding: 0 4px; }
+.cp-ask-question { margin: 4px 0; }
+.cp-ask-options { display: flex; flex-direction: column; gap: 4px; }
+.cp-ask-option { text-align: left; height: auto; padding: 4px 8px; white-space: normal; }
+.cp-ask-option.is-selected { border: 1px solid var(--interactive-accent); background: var(--background-modifier-hover); }
+.cp-ask-desc { font-size: var(--font-ui-smaller); color: var(--text-muted); }
+.cp-ask-other { width: 100%; margin-top: 4px; }
+.cp-plan { max-height: 360px; overflow-y: auto; border-left: 2px solid var(--interactive-accent); padding-left: 8px; margin: 4px 0; }
