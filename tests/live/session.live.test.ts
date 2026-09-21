@@ -99,13 +99,21 @@ describe('실제 CLI', () => {
 
   it('중단', async () => {
     const s = await newSession();
+    const events = collect(s);
     const firstDelta = waitFor(s, (e) => e.kind === 'block-delta');
-    s.send({ prompt: 'Write the numbers from 1 to 400, one per line.', display: 'count', contextLabel: null });
+    s.send({ prompt: 'Write the numbers from 1 to 2000, one per line.', display: 'count', contextLabel: null });
     await firstDelta;
     const end = waitFor(s, (e) => e.kind === 'turn-end' || e.kind === 'stream-error', 60_000);
+    const interruptedAt = Date.now();
     await s.interrupt();
     await end;
+    expect(Date.now() - interruptedAt).toBeLessThan(20_000);
     expect(s.isBusy).toBe(false);
+    const streamed = events
+      .filter((e): e is Extract<PanelEvent, { kind: 'block-delta' }> => e.kind === 'block-delta')
+      .map((e) => e.text)
+      .join('');
+    expect(streamed).not.toContain('2000');
     s.close();
   });
 
