@@ -1,6 +1,8 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { ItemView, setIcon, type WorkspaceLeaf } from 'obsidian';
 import { ChatState, type NoticeAction } from '../chat/ChatState';
+import { ContextSelection, buildPrompt } from '../context/ContextBuilder';
+import { ActiveNoteTracker } from '../context/ActiveNoteTracker';
 import type ClaudePanelPlugin from '../main';
 import { ClaudeSession } from '../session/ClaudeSession';
 import type { PanelEvent } from '../types';
@@ -19,6 +21,8 @@ export class ChatView extends ItemView {
   private headerEl!: HTMLElement;
   private titleEl!: HTMLElement;
   private toolbar!: Toolbar;
+  private tracker!: ActiveNoteTracker;
+  private readonly contextSel = new ContextSelection();
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: ClaudePanelPlugin) {
     super(leaf);
@@ -67,7 +71,12 @@ export class ChatView extends ItemView {
       onSubmit: (text) => this.submit(text),
       onStop: () => void this.session?.interrupt(),
       onCycleMode: () => this.cycleMode(),
+      onFocus: () => this.refreshContext(),
     });
+
+    this.tracker = new ActiveNoteTracker(this.app, () => this.refreshContext());
+    this.tracker.attach((ref) => this.registerEvent(ref));
+    this.refreshContext();
 
     this.newChat();
   }
@@ -111,7 +120,36 @@ export class ChatView extends ItemView {
   }
 
   private submit(text: string): void {
-    this.session?.send({ prompt: text, display: text, contextLabel: null });
+    const session = this.session;
+    if (!session) return;
+    this.refreshContext();
+    const { prompt, contextLabel } = buildPrompt(text, this.contextSel.effective());
+    session.send({ prompt, display: text, contextLabel });
+    if (!text.startsWith('/')) this.contextSel.consumeSelection();
+    this.renderChips();
+  }
+
+  private refreshContext(): void {
+    this.contextSel.update(this.tracker.snapshot(this.plugin.settings.attachActiveNote));
+    this.renderChips();
+  }
+
+  private renderChips(): void {
+    const el = this.composer.chipsEl;
+    el.empty();
+    const { note, selection } = this.contextSel.effective();
+    if (note) this.chip(el, `📄 ${note.path.split('/').pop()?.replace(/\.md$/, '') ?? note.path}`, note.path, () => this.contextSel.dismiss('note'));
+    if (selection) this.chip(el, `✂ 선택 L${selection.fromLine}–${selection.toLine}`, selection.text.slice(0, 200), () => this.contextSel.dismiss('selection'));
+  }
+
+  private chip(parent: HTMLElement, label: string, tooltip: string, onDismiss: () => void): void {
+    const chip = parent.createDiv({ cls: 'cp-chip', attr: { title: tooltip } });
+    chip.createSpan({ text: label });
+    const x = chip.createSpan({ cls: 'cp-chip-x', text: '×', attr: { 'aria-label': '이번 전송에서 빼기' } });
+    x.addEventListener('click', () => {
+      onDismiss();
+      this.renderChips();
+    });
   }
 
   private onEvent(e: PanelEvent): void {

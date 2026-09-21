@@ -50,3 +50,9 @@
 .cp-select { font-size: var(--font-ui-smaller); height: auto; padding: 2px 20px 2px 6px; max-width: 9em; }
 .cp-context { margin-left: auto; font-size: var(--font-ui-smaller); color: var(--text-muted); }
 .cp-context.is-high { color: var(--text-warning); }
+.cp-chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 4px; }
+.cp-chips:empty { display: none; }
+.cp-chip { display: inline-flex; gap: 4px; align-items: center; font-size: var(--font-ui-smaller); background: var(--background-secondary); border-radius: var(--radius-s); padding: 1px 6px; max-width: 100%; }
+.cp-chip > span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cp-chip-x { cursor: pointer; color: var(--text-muted); }
+.cp-chip-x:hover { color: var(--text-normal); }
