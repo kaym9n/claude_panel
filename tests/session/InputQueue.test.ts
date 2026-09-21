@@ -21,4 +21,15 @@ describe('InputQueue', () => {
     q.end();
     expect(() => q.push(1)).toThrow();
   });
+
+  it('for await 루프를 break로 빠져나가면 return()이 호출되어 큐가 끝난다', async () => {
+    const q = new InputQueue<number>();
+    q.push(1);
+    for await (const value of q) {
+      expect(value).toBe(1);
+      break;
+    }
+    expect(q.isEnded).toBe(true);
+    expect(() => q.push(2)).toThrow();
+  });
 });
