@@ -130,10 +130,14 @@ export class ClaudeSession {
     q?.close();
   }
 
-  private restoreModeAfterPlan(): Promise<void> {
+  private async restoreModeAfterPlan(): Promise<void> {
     const previous = this.modeBeforePlan ?? 'default';
     this.modeBeforePlan = null;
-    return this.setPermissionMode(previous);
+    try {
+      await this.setPermissionMode(previous);
+    } catch (err) {
+      this.deps.onStderr?.(`계획 모드 복귀 실패: ${errorMessage(err)}`);
+    }
   }
 
   private start(): void {

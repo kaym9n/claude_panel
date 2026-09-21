@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { SessionConfig } from '../../src/session/buildOptions';
 import { ClaudeSession, errorCode } from '../../src/session/ClaudeSession';
 import type { PanelEvent } from '../../src/types';
@@ -155,6 +155,30 @@ describe('ClaudeSession', () => {
     await tick();
     expect(calls[0].setPermissionMode).toHaveBeenLastCalledWith('auto');
     expect(session.permissionMode).toBe('auto');
+  });
+
+  it('Plan 승인 뒤 권한 모드 복귀가 실패해도 예외 없이 onStderr로 보고하고 세션은 계속 쓸 수 있다', async () => {
+    const { fn, calls } = fakeQueryFn();
+    const onStderr = vi.fn();
+    const session = new ClaudeSession({ query: fn, getConfig: () => config, onStderr });
+    const events: PanelEvent[] = [];
+    session.on((e) => events.push(e));
+
+    session.send(msg('x'));
+    calls[0].emit(init('auto'));
+    await tick();
+    await session.setPermissionMode('plan');
+    calls[0].setPermissionMode.mockRejectedValueOnce(new Error('dead'));
+    const p = session.broker.handle('ExitPlanMode', { plan: 'p' }, { signal: new AbortController().signal, toolUseID: 't', requestId: 'r' } as never);
+    session.broker.decide('apr-1', { type: 'plan-approve' });
+    await p;
+    await tick();
+
+    expect(calls[0].setPermissionMode).toHaveBeenLastCalledWith('auto');
+    expect(session.permissionMode).toBe('auto');
+    expect(onStderr).toHaveBeenCalledWith('계획 모드 복귀 실패: dead');
+    // 세션은 여전히 사용 가능하다 (예외로 죽지 않았다)
+    expect(() => session.send(msg('y'))).not.toThrow();
   });
 
   it('close는 프로세스를 닫고 이후 전송을 막는다', async () => {
