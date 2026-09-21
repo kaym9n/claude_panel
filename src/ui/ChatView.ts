@@ -1,0 +1,125 @@
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import { ItemView, setIcon, type WorkspaceLeaf } from 'obsidian';
+import { ChatState, type NoticeAction } from '../chat/ChatState';
+import type ClaudePanelPlugin from '../main';
+import { ClaudeSession } from '../session/ClaudeSession';
+import type { PanelEvent } from '../types';
+import { Composer } from './Composer';
+import { MessageList } from './MessageList';
+
+export const VIEW_TYPE_CLAUDE_PANEL = 'claude-panel-view';
+
+export class ChatView extends ItemView {
+  private session: ClaudeSession | null = null;
+  private offSession: (() => void) | null = null;
+  private readonly state = new ChatState();
+  private list!: MessageList;
+  private composer!: Composer;
+  private headerEl!: HTMLElement;
+  private titleEl!: HTMLElement;
+
+  constructor(leaf: WorkspaceLeaf, private readonly plugin: ClaudePanelPlugin) {
+    super(leaf);
+  }
+
+  getViewType(): string {
+    return VIEW_TYPE_CLAUDE_PANEL;
+  }
+
+  getDisplayText(): string {
+    return 'Claude';
+  }
+
+  override getIcon(): string {
+    return 'bot';
+  }
+
+  override async onOpen(): Promise<void> {
+    this.plugin.views.add(this);
+    const root = this.contentEl;
+    root.empty();
+    root.addClass('cp-root');
+
+    this.headerEl = root.createDiv({ cls: 'cp-header' });
+    const titleRow = this.headerEl.createDiv({ cls: 'cp-title-row' });
+    this.titleEl = titleRow.createDiv({ cls: 'cp-title', text: '새 대화' });
+    const actions = titleRow.createDiv({ cls: 'cp-header-actions' });
+    this.iconButton(actions, 'plus', '새 대화', () => this.newChat());
+
+    this.list = new MessageList(root.createDiv({ cls: 'cp-messages' }), {
+      app: this.app,
+      owner: this,
+      state: this.state,
+      vaultPath: this.plugin.vaultPath(),
+      onDecision: (id, decision) => this.session?.broker.decide(id, decision),
+      onNoticeAction: (action) => void this.runNoticeAction(action),
+    });
+
+    this.composer = new Composer(root.createDiv({ cls: 'cp-composer' }), {
+      sendKey: () => this.plugin.settings.sendKey,
+      onSubmit: (text) => this.submit(text),
+      onStop: () => void this.session?.interrupt(),
+    });
+
+    this.newChat();
+  }
+
+  override async onClose(): Promise<void> {
+    this.shutdown();
+  }
+
+  /** 패널 닫기·플러그인 unload 때 claude 프로세스를 정리한다. */
+  shutdown(): void {
+    this.offSession?.();
+    this.offSession = null;
+    this.session?.close();
+    this.session = null;
+    this.plugin.views.delete(this);
+  }
+
+  newChat(): void {
+    this.useSession(this.createSession());
+    this.setTitle('새 대화');
+    this.composer.focus();
+  }
+
+  private createSession(): ClaudeSession {
+    return new ClaudeSession({ query, getConfig: () => this.plugin.sessionConfig() });
+  }
+
+  private useSession(session: ClaudeSession): void {
+    this.offSession?.();
+    this.session?.close();
+    this.session = session;
+    this.offSession = session.on((e) => this.onEvent(e));
+    this.state.clear();
+    this.list.clear();
+    this.composer.setBusy(false);
+  }
+
+  private setTitle(title: string): void {
+    this.titleEl.setText(title);
+  }
+
+  private submit(text: string): void {
+    this.session?.send({ prompt: text, display: text, contextLabel: null });
+  }
+
+  private onEvent(e: PanelEvent): void {
+    this.list.update(this.state.apply(e));
+    this.composer.setBusy(this.state.busy);
+  }
+
+  private async runNoticeAction(action: NoticeAction): Promise<void> {
+    if (action === 'reconnect') this.session?.reconnect();
+    else if (action === 'find-claude') await this.plugin.autoFindClaude();
+    else this.plugin.openSettings();
+  }
+
+  private iconButton(parent: HTMLElement, icon: string, label: string, onClick: (evt: MouseEvent) => void): HTMLElement {
+    const btn = parent.createEl('button', { cls: 'cp-icon-btn clickable-icon', attr: { 'aria-label': label } });
+    setIcon(btn, icon);
+    btn.addEventListener('click', onClick);
+    return btn;
+  }
+}
