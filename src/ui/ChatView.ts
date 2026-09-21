@@ -6,8 +6,10 @@ import { ActiveNoteTracker } from '../context/ActiveNoteTracker';
 import type ClaudePanelPlugin from '../main';
 import { ClaudeSession } from '../session/ClaudeSession';
 import type { PanelEvent } from '../types';
+import { applyCommand, matchCommands, slashToken, toCommandItems, type CommandItem } from './commandMatch';
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
+import { SlashPopup } from './SlashPopup';
 import { Toolbar, nextMode } from './Toolbar';
 
 export const VIEW_TYPE_CLAUDE_PANEL = 'claude-panel-view';
@@ -23,6 +25,8 @@ export class ChatView extends ItemView {
   private toolbar!: Toolbar;
   private tracker!: ActiveNoteTracker;
   private readonly contextSel = new ContextSelection();
+  private slash!: SlashPopup;
+  private commands: CommandItem[] | null = null;
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: ClaudePanelPlugin) {
     super(leaf);
@@ -72,7 +76,10 @@ export class ChatView extends ItemView {
       onStop: () => void this.session?.interrupt(),
       onCycleMode: () => this.cycleMode(),
       onFocus: () => this.refreshContext(),
+      onInput: (textarea) => void this.updateSlash(textarea),
+      onKeyDownCapture: (evt) => this.slash.handleKey(evt),
     });
+    this.slash = new SlashPopup(this.composer.el, (item) => this.pickCommand(item));
 
     this.tracker = new ActiveNoteTracker(this.app, () => this.refreshContext());
     this.tracker.attach((ref) => this.registerEvent(ref));
@@ -113,6 +120,8 @@ export class ChatView extends ItemView {
     this.list.clear();
     this.composer.setBusy(false);
     this.toolbar.reset();
+    this.commands = null;
+    this.slash.hide();
   }
 
   private setTitle(title: string): void {
@@ -182,6 +191,36 @@ export class ChatView extends ItemView {
     if (action === 'reconnect') this.session?.reconnect();
     else if (action === 'find-claude') await this.plugin.autoFindClaude();
     else this.plugin.openSettings();
+  }
+
+  private async updateSlash(textarea: HTMLTextAreaElement): Promise<void> {
+    const token = slashToken(textarea.value, textarea.selectionStart);
+    if (token === null) {
+      this.slash.hide();
+      return;
+    }
+    const session = this.session;
+    if (!session) return;
+    if (this.commands === null) {
+      try {
+        session.ensureStarted(); // 명령 목록은 CLI 초기화 결과에서만 얻을 수 있다
+        this.commands = toCommandItems(await session.supportedCommands());
+      } catch {
+        return;
+      }
+      if (this.session !== session) return;
+    }
+    // 목록을 받는 동안 입력이 바뀌었을 수 있으므로 현재 값으로 다시 계산한다
+    const current = slashToken(textarea.value, textarea.selectionStart);
+    if (current === null) this.slash.hide();
+    else this.slash.show(matchCommands(current, this.commands));
+  }
+
+  private pickCommand(item: CommandItem): void {
+    const t = this.composer.textarea;
+    const next = applyCommand(t.value, t.selectionStart, item.name);
+    this.composer.setValue(next.value, next.cursor);
+    this.composer.focus();
   }
 
   private iconButton(parent: HTMLElement, icon: string, label: string, onClick: (evt: MouseEvent) => void): HTMLElement {

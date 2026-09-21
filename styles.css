@@ -56,3 +56,9 @@
 .cp-chip > span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .cp-chip-x { cursor: pointer; color: var(--text-muted); }
 .cp-chip-x:hover { color: var(--text-normal); }
+.cp-slash-popup { position: absolute; left: 10px; right: 10px; bottom: 100%; max-height: 260px; overflow-y: auto; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); box-shadow: var(--shadow-s); z-index: 10; }
+.cp-slash-item { padding: 4px 8px; cursor: pointer; }
+.cp-slash-item.is-selected, .cp-slash-item:hover { background: var(--background-modifier-hover); }
+.cp-slash-name { font-family: var(--font-monospace); }
+.cp-slash-hint { margin-left: 6px; color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.cp-slash-desc { color: var(--text-muted); font-size: var(--font-ui-smaller); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
