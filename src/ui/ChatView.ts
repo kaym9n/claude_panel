@@ -6,6 +6,7 @@ import { ClaudeSession } from '../session/ClaudeSession';
 import type { PanelEvent } from '../types';
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
+import { Toolbar, nextMode } from './Toolbar';
 
 export const VIEW_TYPE_CLAUDE_PANEL = 'claude-panel-view';
 
@@ -17,6 +18,7 @@ export class ChatView extends ItemView {
   private composer!: Composer;
   private headerEl!: HTMLElement;
   private titleEl!: HTMLElement;
+  private toolbar!: Toolbar;
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: ClaudePanelPlugin) {
     super(leaf);
@@ -45,6 +47,11 @@ export class ChatView extends ItemView {
     this.titleEl = titleRow.createDiv({ cls: 'cp-title', text: '새 대화' });
     const actions = titleRow.createDiv({ cls: 'cp-header-actions' });
     this.iconButton(actions, 'plus', '새 대화', () => this.newChat());
+    this.toolbar = new Toolbar(this.headerEl, {
+      onModel: (value) => void this.session?.setModel(value),
+      onEffort: (value) => void this.session?.setEffort(value),
+      onMode: (mode) => void this.session?.setPermissionMode(mode),
+    });
 
     this.list = new MessageList(root.createDiv({ cls: 'cp-messages' }), {
       app: this.app,
@@ -59,6 +66,7 @@ export class ChatView extends ItemView {
       sendKey: () => this.plugin.settings.sendKey,
       onSubmit: (text) => this.submit(text),
       onStop: () => void this.session?.interrupt(),
+      onCycleMode: () => this.cycleMode(),
     });
 
     this.newChat();
@@ -95,6 +103,7 @@ export class ChatView extends ItemView {
     this.state.clear();
     this.list.clear();
     this.composer.setBusy(false);
+    this.toolbar.reset();
   }
 
   private setTitle(title: string): void {
@@ -108,6 +117,27 @@ export class ChatView extends ItemView {
   private onEvent(e: PanelEvent): void {
     this.list.update(this.state.apply(e));
     this.composer.setBusy(this.state.busy);
+    this.updateToolbar(e);
+  }
+
+  private updateToolbar(e: PanelEvent): void {
+    if (e.kind === 'init') {
+      this.toolbar.setResolvedModel(e.model);
+      this.toolbar.setMode(e.permissionMode);
+      const session = this.session;
+      void session?.supportedModels().then((models) => {
+        if (this.session === session) this.toolbar.setModels(models);
+      }).catch(() => undefined);
+    } else if (e.kind === 'mode-changed') {
+      this.toolbar.setMode(e.permissionMode);
+    } else if (e.kind === 'context-usage') {
+      this.toolbar.setContext(e.percentage);
+    }
+  }
+
+  private cycleMode(): void {
+    const session = this.session;
+    if (session) void session.setPermissionMode(nextMode(session.permissionMode));
   }
 
   private async runNoticeAction(action: NoticeAction): Promise<void> {
