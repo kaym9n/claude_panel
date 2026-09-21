@@ -202,13 +202,15 @@ export class ChatView extends ItemView {
     const session = this.session;
     if (!session) return;
     if (this.commands === null) {
+      let fetched: CommandItem[];
       try {
         session.ensureStarted(); // 명령 목록은 CLI 초기화 결과에서만 얻을 수 있다
-        this.commands = toCommandItems(await session.supportedCommands());
+        fetched = toCommandItems(await session.supportedCommands());
       } catch {
         return;
       }
       if (this.session !== session) return;
+      this.commands = fetched;
     }
     // 목록을 받는 동안 입력이 바뀌었을 수 있으므로 현재 값으로 다시 계산한다
     const current = slashToken(textarea.value, textarea.selectionStart);
