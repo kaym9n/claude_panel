@@ -1,5 +1,6 @@
 import { forkSession, getSessionInfo, getSessionMessages, listSessions, query, renameSession } from '@anthropic-ai/claude-agent-sdk';
 import { FileSystemAdapter, Notice, Plugin, type Editor, type WorkspaceLeaf } from 'obsidian';
+import { Diagnostics } from './diagnostics';
 import { RewriteController } from './rewrite/RewriteSelection';
 import type { SessionConfig } from './session/buildOptions';
 import { oneShot } from './session/oneShot';
@@ -13,6 +14,7 @@ export default class ClaudePanelPlugin extends Plugin {
   settings: ClaudePanelSettings = { ...DEFAULT_SETTINGS };
   readonly views = new Set<ChatView>();
   threads!: ThreadService;
+  readonly diagnostics = new Diagnostics();
 
   override async onload(): Promise<void> {
     await this.loadSettings();
@@ -25,6 +27,7 @@ export default class ClaudePanelPlugin extends Plugin {
     this.addRibbonIcon('bot', 'Open Claude panel', () => void this.openPanel(false));
     this.addCommand({ id: 'open-panel', name: 'Open panel', callback: () => void this.openPanel(false) });
     this.addCommand({ id: 'test-connection', name: 'Test connection', callback: () => void this.testConnection() });
+    this.addCommand({ id: 'copy-diagnostics', name: 'Copy diagnostics', callback: () => void this.copyDiagnostics() });
     this.addCommand({
       id: 'rewrite-selection',
       name: 'Rewrite selection',
@@ -92,6 +95,11 @@ export default class ClaudePanelPlugin extends Plugin {
     setting.openTabById(this.manifest.id);
   }
 
+  async copyDiagnostics(): Promise<void> {
+    await navigator.clipboard.writeText(this.diagnostics.report(this.claudePath()));
+    new Notice('진단 정보를 클립보드에 복사했습니다.');
+  }
+
   async openPanel(newPanel: boolean): Promise<void> {
     const { workspace } = this.app;
     let leaf: WorkspaceLeaf | null = newPanel ? null : (workspace.getLeavesOfType(VIEW_TYPE_CLAUDE_PANEL)[0] ?? null);
@@ -119,6 +127,7 @@ export default class ClaudePanelPlugin extends Plugin {
       const r = await oneShot(query, this.sessionConfig(), 'Reply with exactly: pong', { model: 'haiku' });
       notice.setMessage(`연결 성공: ${r.text} (CLI ${r.cliVersion ?? '?'}, ${r.model ?? '?'})`);
     } catch (err) {
+      this.diagnostics.recordError(`test-connection: ${err instanceof Error ? err.message : String(err)}`);
       notice.setMessage(`연결 실패: ${err instanceof Error ? err.message : String(err)}`);
     }
     window.setTimeout(() => notice.hide(), 8000);

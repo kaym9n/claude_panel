@@ -1,5 +1,5 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { ItemView, Notice, setIcon, type WorkspaceLeaf } from 'obsidian';
+import { ItemView, Menu, Notice, setIcon, type WorkspaceLeaf } from 'obsidian';
 import { ChatState, type NoticeAction } from '../chat/ChatState';
 import { ContextSelection, buildPrompt } from '../context/ContextBuilder';
 import { ActiveNoteTracker } from '../context/ActiveNoteTracker';
@@ -64,6 +64,7 @@ export class ChatView extends ItemView {
     this.titleEl.addEventListener('click', () => void this.openThreadPicker());
     this.iconButton(actions, 'history', '스레드 열기', () => void this.openThreadPicker());
     this.iconButton(actions, 'plus', '새 대화', () => this.newChat());
+    this.iconButton(actions, 'more-horizontal', '더보기', (evt) => this.openMenu(evt));
     this.toolbar = new Toolbar(this.headerEl, {
       onModel: (value) => void this.session?.setModel(value),
       onEffort: (value) => void this.session?.setEffort(value),
@@ -121,7 +122,11 @@ export class ChatView extends ItemView {
   }
 
   private createSession(): ClaudeSession {
-    return new ClaudeSession({ query, getConfig: () => this.plugin.sessionConfig() });
+    return new ClaudeSession({
+      query,
+      getConfig: () => this.plugin.sessionConfig(),
+      onStderr: (data) => this.plugin.diagnostics.recordStderr(data),
+    });
   }
 
   private useSession(session: ClaudeSession): void {
@@ -176,6 +181,7 @@ export class ChatView extends ItemView {
   }
 
   private onEvent(e: PanelEvent): void {
+    this.recordDiagnostics(e);
     if (e.kind === 'init') this.resuming = false;
     if (e.kind === 'stream-error' && this.resuming) {
       this.resuming = false;
@@ -314,6 +320,23 @@ export class ChatView extends ItemView {
     const next = applyCommand(t.value, t.selectionStart, item.name);
     this.composer.setValue(next.value, next.cursor);
     this.composer.focus();
+  }
+
+  private recordDiagnostics(e: PanelEvent): void {
+    const d = this.plugin.diagnostics;
+    if (e.kind === 'init') d.cliVersion = e.cliVersion;
+    else if (e.kind === 'stream-error') d.recordError(e.code ? `${e.code}: ${e.message}` : e.message);
+    else if (e.kind === 'assistant-error') d.recordError(`assistant: ${e.error}`);
+    else if (e.kind === 'turn-end' && !e.ok) d.recordError(`${e.subtype}: ${e.errors.join(' / ')}`);
+  }
+
+  private openMenu(evt: MouseEvent): void {
+    const menu = new Menu();
+    menu.addItem((i) => i.setTitle('새 패널 열기').setIcon('plus-square').onClick(() => void this.plugin.openPanel(true)));
+    menu.addItem((i) => i.setTitle('스레드 열기…').setIcon('history').onClick(() => void this.openThreadPicker()));
+    menu.addItem((i) => i.setTitle('진단 정보 복사').setIcon('clipboard-copy').onClick(() => void this.plugin.copyDiagnostics()));
+    menu.addItem((i) => i.setTitle('설정').setIcon('settings').onClick(() => this.plugin.openSettings()));
+    menu.showAtMouseEvent(evt);
   }
 
   private iconButton(parent: HTMLElement, icon: string, label: string, onClick: (evt: MouseEvent) => void): HTMLElement {
