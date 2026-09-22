@@ -23,8 +23,8 @@ export class ChatView extends ItemView {
   private readonly state = new ChatState();
   private list!: MessageList;
   private composer!: Composer;
-  private headerEl!: HTMLElement;
-  private titleEl!: HTMLElement;
+  private panelHeaderEl!: HTMLElement;
+  private threadTitleEl!: HTMLElement;
   private toolbar!: Toolbar;
   private tracker!: ActiveNoteTracker;
   private readonly contextSel = new ContextSelection();
@@ -57,15 +57,15 @@ export class ChatView extends ItemView {
     root.empty();
     root.addClass('cp-root');
 
-    this.headerEl = root.createDiv({ cls: 'cp-header' });
-    const titleRow = this.headerEl.createDiv({ cls: 'cp-title-row' });
-    this.titleEl = titleRow.createDiv({ cls: 'cp-title', text: '새 대화' });
+    this.panelHeaderEl = root.createDiv({ cls: 'cp-header' });
+    const titleRow = this.panelHeaderEl.createDiv({ cls: 'cp-title-row' });
+    this.threadTitleEl = titleRow.createDiv({ cls: 'cp-title', text: '새 대화' });
     const actions = titleRow.createDiv({ cls: 'cp-header-actions' });
-    this.titleEl.addEventListener('click', () => void this.openThreadPicker());
+    this.threadTitleEl.addEventListener('click', () => void this.openThreadPicker());
     this.iconButton(actions, 'history', '스레드 열기', () => void this.openThreadPicker());
     this.iconButton(actions, 'plus', '새 대화', () => this.newChat());
     this.iconButton(actions, 'more-horizontal', '더보기', (evt) => this.openMenu(evt));
-    this.toolbar = new Toolbar(this.headerEl, {
+    this.toolbar = new Toolbar(this.panelHeaderEl, {
       onModel: (value) => void this.session?.setModel(value),
       onEffort: (value) => void this.session?.setEffort(value),
       onMode: (mode) => void this.session?.setPermissionMode(mode),
@@ -143,7 +143,7 @@ export class ChatView extends ItemView {
   }
 
   private setTitle(title: string): void {
-    this.titleEl.setText(title);
+    this.threadTitleEl.setText(title);
   }
 
   private submit(text: string): void {
