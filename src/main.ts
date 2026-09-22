@@ -27,6 +27,9 @@ export default class ClaudePanelPlugin extends Plugin {
     this.registerView(VIEW_TYPE_CLAUDE_PANEL, (leaf) => new ChatView(leaf, this));
     this.addRibbonIcon('bot', 'Open Claude panel', () => void this.openPanel(false));
     this.addCommand({ id: 'open-panel', name: 'Open panel', callback: () => void this.openPanel(false) });
+    this.addCommand({ id: 'open-new-panel', name: 'Open new panel', callback: () => void this.openPanel(true) });
+    this.addCommand({ id: 'new-chat', name: 'New chat', callback: () => void this.withChatView((view) => view.newChat()) });
+    this.addCommand({ id: 'open-thread', name: 'Open thread…', callback: () => void this.withChatView((view) => view.openThreadPicker()) });
     this.addCommand({ id: 'test-connection', name: 'Test connection', callback: () => void this.testConnection() });
     this.addCommand({ id: 'copy-diagnostics', name: 'Copy diagnostics', callback: () => void this.copyDiagnostics() });
     this.addCommand({
@@ -125,6 +128,16 @@ export default class ClaudePanelPlugin extends Plugin {
       return r.text;
     });
     new RewriteModal(this.app, controller).open();
+  }
+
+  /** 활성 패널(없으면 첫 패널)에 작업을 보낸다. 패널이 하나도 없으면 먼저 연다. */
+  private async withChatView(action: (view: ChatView) => void | Promise<void>): Promise<void> {
+    let view: ChatView | null = this.app.workspace.getActiveViewOfType(ChatView) ?? [...this.views][0] ?? null;
+    if (!view) {
+      await this.openPanel(false);
+      view = [...this.views][0] ?? null;
+    }
+    if (view) await action(view);
   }
 
   private async testConnection(): Promise<void> {
