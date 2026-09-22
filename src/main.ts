@@ -1,10 +1,12 @@
 import { forkSession, getSessionInfo, getSessionMessages, listSessions, query, renameSession } from '@anthropic-ai/claude-agent-sdk';
-import { FileSystemAdapter, Notice, Plugin, type WorkspaceLeaf } from 'obsidian';
+import { FileSystemAdapter, Notice, Plugin, type Editor, type WorkspaceLeaf } from 'obsidian';
+import { RewriteController } from './rewrite/RewriteSelection';
 import type { SessionConfig } from './session/buildOptions';
 import { oneShot } from './session/oneShot';
 import { ClaudePanelSettingTab, DEFAULT_SETTINGS, type ClaudePanelSettings } from './settings';
 import { ThreadService, titlePrompt } from './threads/ThreadService';
 import { ChatView, VIEW_TYPE_CLAUDE_PANEL } from './ui/ChatView';
+import { RewriteModal } from './ui/RewriteModal';
 import { buildEnv, findClaudeViaLoginShell, resolveOnPath } from './util/claudePath';
 
 export default class ClaudePanelPlugin extends Plugin {
@@ -23,6 +25,15 @@ export default class ClaudePanelPlugin extends Plugin {
     this.addRibbonIcon('bot', 'Open Claude panel', () => void this.openPanel(false));
     this.addCommand({ id: 'open-panel', name: 'Open panel', callback: () => void this.openPanel(false) });
     this.addCommand({ id: 'test-connection', name: 'Test connection', callback: () => void this.testConnection() });
+    this.addCommand({
+      id: 'rewrite-selection',
+      name: 'Rewrite selection',
+      editorCheckCallback: (checking, editor, ctx) => {
+        if (!editor.somethingSelected()) return false;
+        if (!checking) this.openRewrite(editor, ctx.file?.path ?? '');
+        return true;
+      },
+    });
     this.addSettingTab(new ClaudePanelSettingTab(this.app, this));
   }
 
@@ -90,6 +101,16 @@ export default class ClaudePanelPlugin extends Plugin {
       await leaf.setViewState({ type: VIEW_TYPE_CLAUDE_PANEL, active: true });
     }
     await workspace.revealLeaf(leaf);
+  }
+
+  private openRewrite(editor: Editor, path: string): void {
+    const from = editor.getCursor('from');
+    const to = editor.getCursor('to');
+    const controller = new RewriteController(editor, from, to, editor.getSelection(), path, async (prompt, systemPrompt) => {
+      const r = await oneShot(query, this.sessionConfig(), prompt, { model: this.settings.defaultModel || undefined, systemPrompt });
+      return r.text;
+    });
+    new RewriteModal(this.app, controller).open();
   }
 
   private async testConnection(): Promise<void> {

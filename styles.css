@@ -64,3 +64,8 @@
 .cp-slash-desc { color: var(--text-muted); font-size: var(--font-ui-smaller); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .cp-thread-time { font-size: var(--font-ui-smaller); color: var(--text-faint); }
 .cp-prompt-input { width: 100%; }
+.cp-rewrite-instruction { width: 100%; resize: vertical; }
+.cp-rewrite-status { min-height: 1.4em; font-size: var(--font-ui-small); color: var(--text-muted); margin: 4px 0; }
+.cp-rewrite-diff { white-space: pre-wrap; max-height: 50vh; overflow-y: auto; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); padding: 8px; }
+.cp-rewrite-diff .cp-diff-del { text-decoration: line-through; color: var(--text-error); }
+.cp-rewrite-diff .cp-diff-add { color: var(--text-success); }
