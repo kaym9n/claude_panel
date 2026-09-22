@@ -12,6 +12,7 @@ const ctx = await esbuild.context({
   format: 'cjs',
   platform: 'node',
   target: 'es2022',
+  inject: ['src/util/nodeAbortController.ts'],
   outfile: 'main.js',
   external: ['obsidian', 'electron', '@codemirror/*', '@lezer/*', ...builtinModules, ...builtinModules.map((m) => `node:${m}`)],
   // SDK는 ESM 전용이고 최상위에서 createRequire(import.meta.url)를 호출한다.
