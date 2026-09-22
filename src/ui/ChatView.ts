@@ -1,15 +1,18 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { ItemView, setIcon, type WorkspaceLeaf } from 'obsidian';
+import { ItemView, Notice, setIcon, type WorkspaceLeaf } from 'obsidian';
 import { ChatState, type NoticeAction } from '../chat/ChatState';
 import { ContextSelection, buildPrompt } from '../context/ContextBuilder';
 import { ActiveNoteTracker } from '../context/ActiveNoteTracker';
 import type ClaudePanelPlugin from '../main';
-import { ClaudeSession } from '../session/ClaudeSession';
+import { ClaudeSession, errorMessage } from '../session/ClaudeSession';
 import type { PanelEvent } from '../types';
+import type { ThreadInfo } from '../threads/ThreadService';
 import { applyCommand, matchCommands, slashToken, toCommandItems, type CommandItem } from './commandMatch';
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
 import { SlashPopup } from './SlashPopup';
+import { TextPromptModal } from './TextPromptModal';
+import { ThreadPicker } from './ThreadPicker';
 import { Toolbar, nextMode } from './Toolbar';
 
 export const VIEW_TYPE_CLAUDE_PANEL = 'claude-panel-view';
@@ -27,6 +30,10 @@ export class ChatView extends ItemView {
   private readonly contextSel = new ContextSelection();
   private slash!: SlashPopup;
   private commands: CommandItem[] | null = null;
+  private isNewThread = true;
+  private titled = false;
+  private firstPrompt: string | null = null;
+  private resuming = false;
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: ClaudePanelPlugin) {
     super(leaf);
@@ -54,6 +61,8 @@ export class ChatView extends ItemView {
     const titleRow = this.headerEl.createDiv({ cls: 'cp-title-row' });
     this.titleEl = titleRow.createDiv({ cls: 'cp-title', text: '새 대화' });
     const actions = titleRow.createDiv({ cls: 'cp-header-actions' });
+    this.titleEl.addEventListener('click', () => void this.openThreadPicker());
+    this.iconButton(actions, 'history', '스레드 열기', () => void this.openThreadPicker());
     this.iconButton(actions, 'plus', '새 대화', () => this.newChat());
     this.toolbar = new Toolbar(this.headerEl, {
       onModel: (value) => void this.session?.setModel(value),
@@ -104,6 +113,10 @@ export class ChatView extends ItemView {
   newChat(): void {
     this.useSession(this.createSession());
     this.setTitle('새 대화');
+    this.isNewThread = true;
+    this.titled = false;
+    this.firstPrompt = null;
+    this.resuming = false;
     this.composer.focus();
   }
 
@@ -133,6 +146,7 @@ export class ChatView extends ItemView {
     if (!session) return;
     this.refreshContext();
     const { prompt, contextLabel } = buildPrompt(text, this.contextSel.effective());
+    if (this.firstPrompt === null) this.firstPrompt = text;
     session.send({ prompt, display: text, contextLabel });
     if (!text.startsWith('/')) this.contextSel.consumeSelection();
     this.renderChips();
@@ -162,9 +176,86 @@ export class ChatView extends ItemView {
   }
 
   private onEvent(e: PanelEvent): void {
+    if (e.kind === 'init') this.resuming = false;
+    if (e.kind === 'stream-error' && this.resuming) {
+      this.resuming = false;
+      new Notice(`이어하기에 실패해 새 대화로 전환합니다: ${e.message}`);
+      this.newChat();
+      return;
+    }
     this.list.update(this.state.apply(e));
     this.composer.setBusy(this.state.busy);
     this.updateToolbar(e);
+    if (e.kind === 'turn-end') this.maybeAutoTitle();
+  }
+
+  async openThreadPicker(): Promise<void> {
+    let threads: ThreadInfo[];
+    try {
+      threads = await this.plugin.threads.list();
+    } catch (err) {
+      new Notice(`스레드 목록을 읽지 못했습니다: ${errorMessage(err)}`);
+      return;
+    }
+    new ThreadPicker(this.app, threads, {
+      onOpen: (t) => void this.loadThread(t.id, t.title),
+      onFork: (t) => void this.forkThread(t),
+      onRename: (t) => this.renameThread(t),
+    }).open();
+  }
+
+  async loadThread(id: string, title: string): Promise<void> {
+    const session = this.createSession();
+    session.resumeFrom(id);
+    this.useSession(session);
+    this.setTitle(title);
+    this.isNewThread = false;
+    this.firstPrompt = null;
+    this.resuming = true;
+    try {
+      const events = await this.plugin.threads.history(id);
+      if (this.session !== session) return;
+      this.list.update(events.flatMap((e) => this.state.apply(e)));
+    } catch (err) {
+      new Notice(`대화 기록을 읽지 못했습니다: ${errorMessage(err)}`);
+    }
+  }
+
+  private async forkThread(thread: ThreadInfo): Promise<void> {
+    try {
+      const id = await this.plugin.threads.fork(thread.id);
+      await this.loadThread(id, `${thread.title} (fork)`);
+    } catch (err) {
+      new Notice(`fork 실패: ${errorMessage(err)}`);
+    }
+  }
+
+  private renameThread(thread: ThreadInfo): void {
+    new TextPromptModal(this.app, '스레드 이름 변경', thread.title, async (value) => {
+      try {
+        await this.plugin.threads.rename(thread.id, value);
+        if (this.session?.sessionId === thread.id) {
+          this.setTitle(value);
+          this.titled = true;
+        }
+      } catch (err) {
+        new Notice(`이름 변경 실패: ${errorMessage(err)}`);
+      }
+    }).open();
+  }
+
+  /** 새 대화의 첫 턴이 끝나면 한 번만 제목을 만든다. 실패해도 대화에는 영향 없음. */
+  private maybeAutoTitle(): void {
+    const session = this.session;
+    const id = session?.sessionId;
+    if (!session || !id || !this.isNewThread || this.titled || this.firstPrompt === null) return;
+    this.titled = true;
+    void this.plugin.threads
+      .autoTitle(id, this.firstPrompt)
+      .then((title) => {
+        if (this.session === session) this.setTitle(title);
+      })
+      .catch(() => undefined);
   }
 
   private updateToolbar(e: PanelEvent): void {

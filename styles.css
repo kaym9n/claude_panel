@@ -62,3 +62,5 @@
 .cp-slash-name { font-family: var(--font-monospace); }
 .cp-slash-hint { margin-left: 6px; color: var(--text-faint); font-size: var(--font-ui-smaller); }
 .cp-slash-desc { color: var(--text-muted); font-size: var(--font-ui-smaller); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cp-thread-time { font-size: var(--font-ui-smaller); color: var(--text-faint); }
+.cp-prompt-input { width: 100%; }

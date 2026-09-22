@@ -1,17 +1,24 @@
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { forkSession, getSessionInfo, getSessionMessages, listSessions, query, renameSession } from '@anthropic-ai/claude-agent-sdk';
 import { FileSystemAdapter, Notice, Plugin, type WorkspaceLeaf } from 'obsidian';
 import type { SessionConfig } from './session/buildOptions';
 import { oneShot } from './session/oneShot';
 import { ClaudePanelSettingTab, DEFAULT_SETTINGS, type ClaudePanelSettings } from './settings';
+import { ThreadService, titlePrompt } from './threads/ThreadService';
 import { ChatView, VIEW_TYPE_CLAUDE_PANEL } from './ui/ChatView';
 import { buildEnv, findClaudeViaLoginShell, resolveOnPath } from './util/claudePath';
 
 export default class ClaudePanelPlugin extends Plugin {
   settings: ClaudePanelSettings = { ...DEFAULT_SETTINGS };
   readonly views = new Set<ChatView>();
+  threads!: ThreadService;
 
   override async onload(): Promise<void> {
     await this.loadSettings();
+    this.threads = new ThreadService(
+      { listSessions, getSessionMessages, getSessionInfo, forkSession, renameSession },
+      () => this.vaultPath(),
+      async (firstMessage) => (await oneShot(query, this.sessionConfig(), titlePrompt(firstMessage), { model: 'haiku' })).text,
+    );
     this.registerView(VIEW_TYPE_CLAUDE_PANEL, (leaf) => new ChatView(leaf, this));
     this.addRibbonIcon('bot', 'Open Claude panel', () => void this.openPanel(false));
     this.addCommand({ id: 'open-panel', name: 'Open panel', callback: () => void this.openPanel(false) });
