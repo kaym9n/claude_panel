@@ -3,6 +3,7 @@ import { FileSystemAdapter, Notice, Plugin, type Editor, type WorkspaceLeaf } fr
 import { Diagnostics } from './diagnostics';
 import { RewriteController } from './rewrite/RewriteSelection';
 import type { SessionConfig } from './session/buildOptions';
+import { errorMessage } from './session/ClaudeSession';
 import { oneShot } from './session/oneShot';
 import { ClaudePanelSettingTab, DEFAULT_SETTINGS, type ClaudePanelSettings } from './settings';
 import { ThreadService, titlePrompt } from './threads/ThreadService';
@@ -96,8 +97,13 @@ export default class ClaudePanelPlugin extends Plugin {
   }
 
   async copyDiagnostics(): Promise<void> {
-    await navigator.clipboard.writeText(this.diagnostics.report(this.claudePath()));
-    new Notice('진단 정보를 클립보드에 복사했습니다.');
+    try {
+      await navigator.clipboard.writeText(this.diagnostics.report(this.claudePath()));
+      new Notice('진단 정보를 클립보드에 복사했습니다.');
+    } catch (err) {
+      this.diagnostics.recordError(`copy-diagnostics: ${errorMessage(err)}`);
+      new Notice(`진단 정보 복사에 실패했습니다: ${errorMessage(err)}`);
+    }
   }
 
   async openPanel(newPanel: boolean): Promise<void> {
