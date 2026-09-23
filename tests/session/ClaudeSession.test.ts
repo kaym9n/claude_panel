@@ -18,6 +18,25 @@ function setup(cfg: SessionConfig = config) {
 }
 
 describe('ClaudeSession', () => {
+  it('실패한 설정을 적용된 상태나 다음 연결 옵션에 남기지 않는다', async () => {
+    const { session, calls, events } = setup();
+    await session.setModel('sonnet');
+    await session.setEffort('low');
+    await session.setPermissionMode('default');
+    session.send(msg('x'));
+    calls[0].setModel.mockRejectedValueOnce(new Error('model failed'));
+    calls[0].applyFlagSettings.mockRejectedValueOnce(new Error('effort failed'));
+    calls[0].setPermissionMode.mockRejectedValueOnce(new Error('mode failed'));
+    await expect(session.setModel('opus')).rejects.toThrow();
+    await expect(session.setEffort('high')).rejects.toThrow();
+    await expect(session.setPermissionMode('acceptEdits')).rejects.toThrow();
+    expect(session.permissionMode).toBe('default');
+    expect(events).not.toContainEqual({ kind: 'mode-changed', permissionMode: 'acceptEdits' });
+    calls[0].end(); await tick();
+    session.send(msg('retry'));
+    expect(calls[1].params.options).toMatchObject({ model: 'sonnet', effort: 'low', permissionMode: 'default' });
+    session.close();
+  });
   it('첫 전송 때 query를 시작하고 사용자 메시지를 입력 큐로 보낸다', async () => {
     const { session, calls, events } = setup();
     expect(calls).toHaveLength(0);
@@ -42,6 +61,7 @@ describe('ClaudeSession', () => {
     expect(session.isBusy).toBe(false);
     expect(events.map((e) => e.kind)).toEqual(['turn-start', 'init', 'turn-end', 'context-usage']);
     expect(events[3]).toEqual({ kind: 'context-usage', percentage: 42 });
+    expect(calls[0].getContextUsage).toHaveBeenCalledWith({ detail: 'summary' });
   });
 
   it('시작 전에 바꾼 모델·추론 강도·권한 모드를 시작 옵션에 담는다', async () => {
@@ -175,7 +195,7 @@ describe('ClaudeSession', () => {
     await tick();
 
     expect(calls[0].setPermissionMode).toHaveBeenLastCalledWith('auto');
-    expect(session.permissionMode).toBe('auto');
+    expect(session.permissionMode).toBe('plan'); // failed changes must not appear applied
     expect(onStderr).toHaveBeenCalledWith('계획 모드 복귀 실패: dead');
     // 세션은 여전히 사용 가능하다 (예외로 죽지 않았다)
     expect(() => session.send(msg('y'))).not.toThrow();

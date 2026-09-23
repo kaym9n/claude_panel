@@ -8,6 +8,10 @@ import { ClaudeSession, errorMessage } from '../session/ClaudeSession';
 import type { PanelEvent } from '../types';
 import type { ThreadInfo } from '../threads/ThreadService';
 import { applyCommand, matchCommands, slashToken, toCommandItems, type CommandItem } from './commandMatch';
+import { UsagePanel } from './UsagePanel';
+import { buttonIcon, inlineIcon } from './icons';
+import { ActivityState } from './ActivityState';
+import { ContextPreviewModal } from './ContextPreviewModal';
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
 import { SlashPopup } from './SlashPopup';
@@ -23,6 +27,10 @@ export class ChatView extends ItemView {
   private readonly state = new ChatState();
   private list!: MessageList;
   private composer!: Composer;
+  private readonly activity = new ActivityState();
+  private lastSubmitted: string | null = null;
+  private restoringHistory = false;
+  private usagePanel: UsagePanel | null = null;
   private panelHeaderEl!: HTMLElement;
   private threadTitleEl!: HTMLElement;
   private toolbar!: Toolbar;
@@ -65,13 +73,9 @@ export class ChatView extends ItemView {
     this.iconButton(actions, 'history', '스레드 열기', () => void this.openThreadPicker());
     this.iconButton(actions, 'plus', '새 대화', () => this.newChat());
     this.iconButton(actions, 'more-horizontal', '더보기', (evt) => this.openMenu(evt));
-    this.toolbar = new Toolbar(this.panelHeaderEl, {
-      onModel: (value) => void this.session?.setModel(value),
-      onEffort: (value) => void this.session?.setEffort(value),
-      onMode: (mode) => void this.session?.setPermissionMode(mode),
-    });
 
-    this.list = new MessageList(root.createDiv({ cls: 'cp-messages' }), {
+    const transcript = root.createDiv({ cls: 'cp-transcript' });
+    this.list = new MessageList(transcript.createDiv({ cls: 'cp-messages' }), {
       app: this.app,
       owner: this,
       state: this.state,
@@ -89,6 +93,15 @@ export class ChatView extends ItemView {
       onInput: (textarea) => void this.updateSlash(textarea),
       onKeyDownCapture: (evt) => this.slash.handleKey(evt),
     });
+    this.toolbar = new Toolbar(this.composer.controlsEl, {
+      onModel: (value) => this.session?.setModel(value),
+      onEffort: (value) => this.session?.setEffort(value),
+      onMode: (mode) => this.session?.setPermissionMode(mode),
+      onError: (message) => new Notice(message),
+    });
+    this.usagePanel = new UsagePanel(this.composer.controlsEl.createDiv({ cls: 'cp-usage' }), this.plugin.usage);
+    actions.prepend(this.composer.statusEl);
+    actions.prepend(this.composer.el.querySelector('.cp-input-hint')!);
     this.slash = new SlashPopup(this.composer.el, (item) => this.pickCommand(item));
 
     this.tracker = new ActiveNoteTracker(this.app, () => this.refreshContext());
@@ -104,10 +117,13 @@ export class ChatView extends ItemView {
 
   /** 패널 닫기·플러그인 unload 때 claude 프로세스를 정리한다. */
   shutdown(): void {
+    this.usagePanel?.destroy();
+    this.usagePanel = null;
     this.offSession?.();
     this.offSession = null;
     this.session?.close();
     this.session = null;
+    this.list?.clear();
     this.plugin.views.delete(this);
   }
 
@@ -134,6 +150,9 @@ export class ChatView extends ItemView {
     this.session?.close();
     this.session = session;
     this.offSession = session.on((e) => this.onEvent(e));
+    this.lastSubmitted = null;
+    this.restoringHistory = false;
+    this.composer.setStatus(this.activity.reset());
     this.state.clear();
     this.list.clear();
     this.composer.setBusy(false);
@@ -149,10 +168,17 @@ export class ChatView extends ItemView {
   private submit(text: string): void {
     const session = this.session;
     if (!session) return;
+    if (this.restoringHistory) {
+      this.composer.offerRestore(text);
+      new Notice('대화 기록을 불러오는 중입니다. 잠시 후 전송하세요.');
+      return;
+    }
+    this.lastSubmitted = text;
     this.refreshContext();
     const { prompt, contextLabel } = buildPrompt(text, this.contextSel.effective());
     if (this.firstPrompt === null) this.firstPrompt = text;
-    session.send({ prompt, display: text, contextLabel });
+    try { session.send({ prompt, display: text, contextLabel }); }
+    catch (error) { this.composer.offerRestore(text); new Notice(errorMessage(error)); return; }
     if (!text.startsWith('/')) this.contextSel.consumeSelection();
     this.renderChips();
   }
@@ -172,8 +198,12 @@ export class ChatView extends ItemView {
 
   private chip(parent: HTMLElement, label: string, tooltip: string, onDismiss: () => void): void {
     const chip = parent.createDiv({ cls: 'cp-chip', attr: { title: tooltip } });
-    chip.createSpan({ text: label });
-    const x = chip.createSpan({ cls: 'cp-chip-x', text: '×', attr: { 'aria-label': '이번 전송에서 빼기' } });
+    const preview = chip.createEl('button', { cls: 'cp-chip-preview', attr: { 'aria-label': `${label} 첨부 미리보기` } });
+    inlineIcon(preview, label.startsWith('📄') ? 'file-text' : 'text-select');
+    preview.createSpan({ text: label.replace(/^[📄✂]\s*/u, '') });
+    preview.addEventListener('click', () => new ContextPreviewModal(this.app, this.contextSel.effective()).open());
+    const x = chip.createEl('button', { cls: 'cp-chip-x', text: '×', attr: { 'aria-label': `${label} 이번 전송에서 빼기` } });
+    buttonIcon(x, 'x', `${label} 이번 전송에서 빼기`);
     x.addEventListener('click', () => {
       onDismiss();
       this.renderChips();
@@ -182,6 +212,14 @@ export class ChatView extends ItemView {
 
   private onEvent(e: PanelEvent): void {
     this.recordDiagnostics(e);
+    this.composer.setStatus(this.activity.apply(e));
+    if ((e.kind === 'stream-error' || (e.kind === 'turn-end' && !e.ok)) && this.lastSubmitted) {
+      this.composer.offerRestore(this.lastSubmitted);
+      this.lastSubmitted = null;
+    }
+    if ((e.kind === 'turn-end' && e.ok) || e.kind === 'interrupted') this.lastSubmitted = null;
+    if (e.kind === 'rate-limit') this.plugin.usage.onRateLimit(e.info);
+    if (e.kind === 'turn-end') void this.plugin.usage.refresh();
     if (e.kind === 'init') this.resuming = false;
     if (e.kind === 'stream-error' && this.resuming) {
       this.resuming = false;
@@ -207,7 +245,7 @@ export class ChatView extends ItemView {
       onOpen: (t) => void this.loadThread(t.id, t.title),
       onFork: (t) => void this.forkThread(t),
       onRename: (t) => this.renameThread(t),
-    }).open();
+    }, this.session?.sessionId ?? null).open();
   }
 
   async loadThread(id: string, title: string): Promise<void> {
@@ -218,12 +256,20 @@ export class ChatView extends ItemView {
     this.isNewThread = false;
     this.firstPrompt = null;
     this.resuming = true;
+    this.restoringHistory = true;
+    this.composer.setStatus(this.activity.reset('대화 기록 불러오는 중…'));
     try {
       const events = await this.plugin.threads.history(id);
       if (this.session !== session) return;
       this.list.update(events.flatMap((e) => this.state.apply(e)));
+      this.composer.setStatus(this.activity.reset('이전 대화 복원됨 · 이어서 입력하세요'));
     } catch (err) {
-      new Notice(`대화 기록을 읽지 못했습니다: ${errorMessage(err)}`);
+      if (this.session === session) {
+        this.composer.setStatus(this.activity.reset('대화 기록 불러오기 실패'));
+        new Notice(`대화 기록을 읽지 못했습니다: ${errorMessage(err)}`);
+      }
+    } finally {
+      if (this.session === session) this.restoringHistory = false;
     }
   }
 
@@ -267,11 +313,14 @@ export class ChatView extends ItemView {
   private updateToolbar(e: PanelEvent): void {
     if (e.kind === 'init') {
       this.toolbar.setResolvedModel(e.model);
+      this.toolbar.setResolvedEffort(e.effort);
       this.toolbar.setMode(e.permissionMode);
       const session = this.session;
       void session?.supportedModels().then((models) => {
         if (this.session === session) this.toolbar.setModels(models);
       }).catch(() => undefined);
+    } else if (e.kind === 'model-resolved') {
+      this.toolbar.setResolvedModel(e.model);
     } else if (e.kind === 'mode-changed') {
       this.toolbar.setMode(e.permissionMode);
     } else if (e.kind === 'context-usage') {
@@ -281,7 +330,7 @@ export class ChatView extends ItemView {
 
   private cycleMode(): void {
     const session = this.session;
-    if (session) void session.setPermissionMode(nextMode(session.permissionMode));
+    if (session) void session.setPermissionMode(nextMode(session.permissionMode)).catch(e => new Notice(errorMessage(e)));
   }
 
   private async runNoticeAction(action: NoticeAction): Promise<void> {
@@ -341,7 +390,7 @@ export class ChatView extends ItemView {
 
   private iconButton(parent: HTMLElement, icon: string, label: string, onClick: (evt: MouseEvent) => void): HTMLElement {
     const btn = parent.createEl('button', { cls: 'cp-icon-btn clickable-icon', attr: { 'aria-label': label } });
-    setIcon(btn, icon);
+    buttonIcon(btn, icon, label);
     btn.addEventListener('click', onClick);
     return btn;
   }

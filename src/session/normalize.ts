@@ -28,6 +28,8 @@ export class Normalizer {
     const msg = raw as Loose;
     if (msg.parent_tool_use_id) return []; // 서브에이전트 내부 흐름은 1차 버전에서 표시하지 않음
     switch (msg.type) {
+      case 'rate_limit_event':
+        return this.options.history || !msg.rate_limit_info ? [] : [{ kind: 'rate-limit', info: msg.rate_limit_info }];
       case 'system':
         return this.system(msg);
       case 'stream_event':
@@ -58,8 +60,12 @@ export class Normalizer {
         }];
       case 'api_retry':
         return [{ kind: 'retry', attempt: Number(msg.attempt ?? 0), maxRetries: Number(msg.max_retries ?? 0) }];
-      case 'status':
-        return typeof msg.permissionMode === 'string' ? [{ kind: 'mode-changed', permissionMode: msg.permissionMode }] : [];
+      case 'status': {
+        const out: PanelEvent[] = [];
+        if (typeof msg.permissionMode === 'string') out.push({ kind: 'mode-changed', permissionMode: msg.permissionMode });
+        if (msg.status === null || msg.status === 'compacting') out.push({ kind: 'compacting', active: msg.status === 'compacting' });
+        return out;
+      }
       default:
         return [];
     }
@@ -68,7 +74,7 @@ export class Normalizer {
   private stream(event: Loose): PanelEvent[] {
     if (event.type === 'message_start') {
       this.streamMessageId = typeof event.message?.id === 'string' ? event.message.id : null;
-      return [];
+      return typeof event.message?.model === 'string' ? [{ kind: 'model-resolved', model: event.message.model }] : [];
     }
     if (!this.streamMessageId || typeof event.index !== 'number') return [];
     const key = `${this.streamMessageId}#${event.index}`;
@@ -86,6 +92,7 @@ export class Normalizer {
 
   private assistant(msg: Loose): PanelEvent[] {
     const out: PanelEvent[] = [];
+    if (!this.options.history && typeof msg.message?.model === 'string') out.push({ kind: 'model-resolved', model: msg.message.model });
     if (typeof msg.error === 'string') out.push({ kind: 'assistant-error', error: msg.error });
     const messageId = String(msg.message?.id ?? msg.uuid ?? '');
     const content: Loose[] = Array.isArray(msg.message?.content) ? msg.message.content : [];

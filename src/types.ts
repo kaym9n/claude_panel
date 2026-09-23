@@ -23,6 +23,9 @@ export interface ApprovalRequest {
 }
 
 export type PanelEvent =
+  | { kind: 'model-resolved'; model: string }
+  | { kind: 'compacting'; active: boolean }
+  | { kind: 'rate-limit'; info: unknown }
   // normalize.ts가 SDK 메시지에서 만드는 이벤트
   | { kind: 'init'; sessionId: string; model: string; permissionMode: string; slashCommands: string[]; cliVersion: string; effort: string | null }
   | { kind: 'block-start'; key: string; blockType: BlockType }

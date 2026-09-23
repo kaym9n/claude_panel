@@ -46,6 +46,20 @@ describe('Normalizer — 녹화된 실제 스트림', () => {
 });
 
 describe('Normalizer — 개별 경우', () => {
+  it('실제 응답 모델과 압축 상태를 전달하며 기록의 모델을 현재 모델로 표시하지 않는다', () => {
+    const n = new Normalizer();
+    expect(n.push({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm', model: 'actual-model' } } }))
+      .toEqual([{ kind: 'model-resolved', model: 'actual-model' }]);
+    expect(n.push({ type: 'system', subtype: 'status', status: 'compacting' }))
+      .toEqual([{ kind: 'compacting', active: true }]);
+    expect(new Normalizer({ history: true }).push({ type: 'assistant', message: { model: 'old-model', content: [] } })).toEqual([]);
+  });
+  it('한도 이벤트를 보존하되 과거 기록의 한도는 현재값으로 재생하지 않는다', () => {
+    const info = { status: 'rejected', rateLimitType: 'five_hour', resetsAt: 1790080200 };
+    const message = { type: 'rate_limit_event', rate_limit_info: info };
+    expect(new Normalizer().push(message)).toEqual([{ kind: 'rate-limit', info }]);
+    expect(new Normalizer({ history: true }).push(message)).toEqual([]);
+  });
   it('stream_event 키와 assistant 블록 키가 같은 규칙으로 맞춰진다', () => {
     const n = new Normalizer();
     const out = [
@@ -77,7 +91,7 @@ describe('Normalizer — 개별 경우', () => {
   it('api_retry·status·init을 변환한다', () => {
     const n = new Normalizer();
     expect(n.push({ type: 'system', subtype: 'api_retry', attempt: 2, max_retries: 10 })).toEqual([{ kind: 'retry', attempt: 2, maxRetries: 10 }]);
-    expect(n.push({ type: 'system', subtype: 'status', status: null, permissionMode: 'plan' })).toEqual([{ kind: 'mode-changed', permissionMode: 'plan' }]);
+    expect(n.push({ type: 'system', subtype: 'status', status: null, permissionMode: 'plan' })).toEqual([{ kind: 'mode-changed', permissionMode: 'plan' }, { kind: 'compacting', active: false }]);
     expect(n.push({ type: 'system', subtype: 'status', status: 'requesting' })).toEqual([]);
     expect(n.push({ type: 'system', subtype: 'init', session_id: 's1', model: 'm', permissionMode: 'auto', slash_commands: ['ingest'], claude_code_version: '2.1.278', effort: 'high' }))
       .toEqual([{ kind: 'init', sessionId: 's1', model: 'm', permissionMode: 'auto', slashCommands: ['ingest'], cliVersion: '2.1.278', effort: 'high' }]);

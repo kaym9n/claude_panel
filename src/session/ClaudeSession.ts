@@ -91,21 +91,21 @@ export class ClaudeSession {
   }
 
   async setModel(model: string | undefined): Promise<void> {
-    this.overrides.model = model;
     if (this.q) await this.q.setModel(model);
+    this.overrides.model = model;
   }
 
   async setEffort(effort: EffortLevel | undefined): Promise<void> {
-    this.overrides.effort = effort;
     if (this.q) await this.q.applyFlagSettings({ effortLevel: effort ?? null });
+    this.overrides.effort = effort;
   }
 
   async setPermissionMode(mode: PermissionMode): Promise<void> {
+    if (this.q) await this.q.setPermissionMode(mode);
     if (mode === 'plan' && this.permissionMode !== 'plan') this.modeBeforePlan = this.permissionMode ?? 'default';
     this.overrides.permissionMode = mode;
     this.permissionMode = mode;
     this.emit({ kind: 'mode-changed', permissionMode: mode });
-    if (this.q) await this.q.setPermissionMode(mode);
   }
 
   async supportedCommands(): Promise<SlashCommand[]> {
@@ -177,6 +177,8 @@ export class ClaudeSession {
       this.model = e.model;
       this.cliVersion = e.cliVersion;
       this.permissionMode = e.permissionMode as PermissionMode;
+    } else if (e.kind === 'model-resolved') {
+      this.model = e.model;
     } else if (e.kind === 'mode-changed') {
       this.permissionMode = e.permissionMode as PermissionMode;
     } else if (e.kind === 'turn-end') {
@@ -202,7 +204,7 @@ export class ClaudeSession {
 
   private async refreshContextUsage(q: Query): Promise<void> {
     try {
-      const usage = await q.getContextUsage();
+      const usage = await q.getContextUsage({ detail: 'summary' });
       if (this.q === q) this.emit({ kind: 'context-usage', percentage: usage.percentage });
     } catch {
       // 컨텍스트 사용률은 부가 정보라 실패해도 무시한다

@@ -1,5 +1,7 @@
 import { forkSession, getSessionInfo, getSessionMessages, listSessions, query, renameSession } from '@anthropic-ai/claude-agent-sdk';
 import { FileSystemAdapter, Notice, Plugin, type Editor, type WorkspaceLeaf } from 'obsidian';
+import { UsageService } from './usage/UsageService';
+import { readUsageStandalone } from './usage/readUsage';
 import { Diagnostics } from './diagnostics';
 import { RewriteController } from './rewrite/RewriteSelection';
 import type { SessionConfig } from './session/buildOptions';
@@ -15,6 +17,7 @@ export default class ClaudePanelPlugin extends Plugin {
   settings: ClaudePanelSettings = { ...DEFAULT_SETTINGS };
   readonly views = new Set<ChatView>();
   threads!: ThreadService;
+  readonly usage = new UsageService((signal) => readUsageStandalone(query, this.sessionConfig(), signal));
   readonly diagnostics = new Diagnostics();
 
   override async onload(): Promise<void> {
@@ -48,6 +51,7 @@ export default class ClaudePanelPlugin extends Plugin {
     // 열린 패널의 claude 프로세스를 모두 정리한다
     for (const view of [...this.views]) view.shutdown();
     this.views.clear();
+    this.usage.dispose();
   }
 
   async loadSettings(): Promise<void> {
@@ -57,6 +61,8 @@ export default class ClaudePanelPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+    this.usage.reset();
+    if (this.views.size) void this.usage.refresh();
   }
 
   vaultPath(): string {

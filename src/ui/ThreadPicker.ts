@@ -9,9 +9,9 @@ export interface ThreadPickerHandlers {
 }
 
 export class ThreadPicker extends FuzzySuggestModal<ThreadInfo> {
-  constructor(app: App, private readonly threads: ThreadInfo[], private readonly h: ThreadPickerHandlers) {
+  constructor(app: App, private readonly threads: ThreadInfo[], private readonly h: ThreadPickerHandlers, private readonly currentId: string | null = null) {
     super(app);
-    this.setPlaceholder('스레드 검색');
+    this.setPlaceholder('최근 대화 검색');
     this.setInstructions([
       { command: '↵', purpose: '열기' },
       { command: 'Ctrl+↵', purpose: 'fork해서 열기' },
@@ -31,7 +31,7 @@ export class ThreadPicker extends FuzzySuggestModal<ThreadInfo> {
 
   override renderSuggestion(match: FuzzyMatch<ThreadInfo>, el: HTMLElement): void {
     super.renderSuggestion(match, el);
-    el.createDiv({ cls: 'cp-thread-time', text: formatRelativeTime(match.item.lastModified, Date.now()) });
+    el.createDiv({ cls: 'cp-thread-time', text: `${match.item.id === this.currentId ? '현재 대화 · ' : ''}${formatRelativeTime(match.item.lastModified, Date.now())}` });
   }
 
   onChooseItem(thread: ThreadInfo): void {

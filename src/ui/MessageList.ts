@@ -4,6 +4,8 @@ import type { ApprovalDecision } from '../session/ApprovalBroker';
 import { renderApprovalCard } from './ApprovalCard';
 import { formatSeconds, formatUsage } from './format';
 import { toolDetails, toolSummary } from './toolFormat';
+import { buttonIcon, inlineIcon } from './icons';
+import { activitySummary } from './activitySummary';
 
 export interface MessageListContext {
   app: App;
@@ -16,7 +18,7 @@ export interface MessageListContext {
 }
 
 const RENDER_INTERVAL_MS = 100;
-const STATUS_ICON: Record<ItemOf<'tool'>['status'], string> = { running: '…', done: '✓', error: '✗', cancelled: '⊘' };
+const STATUS_ICON: Record<ItemOf<'tool'>['status'], string> = { running: 'loader-circle', done: 'check', error: 'circle-x', cancelled: 'circle-minus' };
 const ACTION_LABEL: Record<NoticeAction, string> = { reconnect: '다시 연결', 'find-claude': '경로 자동 찾기', 'open-settings': '설정 열기' };
 
 export class MessageList {
@@ -24,9 +26,17 @@ export class MessageList {
   private readonly renderers = new Map<string, Component>();
   private readonly pending = new Set<string>();
   private timer: number | null = null;
+  private activeGroup: { root: HTMLElement; summary: HTMLElement; ids: Set<string> } | null = null;
+  private readonly groups: NonNullable<MessageList['activeGroup']>[] = [];
+  private readonly jump: HTMLButtonElement;
 
   constructor(private readonly root: HTMLElement, private readonly ctx: MessageListContext) {
     root.addEventListener('click', (evt) => this.onLinkClick(evt));
+    this.jump = root.parentElement!.createEl('button', { cls: 'cp-jump-latest', text: '↓ 최신 응답', attr: { 'aria-label': '최신 응답으로 이동' } });
+    buttonIcon(this.jump, 'arrow-down', '최신 응답으로 이동');
+    this.jump.hidden = true;
+    this.jump.addEventListener('click', () => this.scrollToBottom());
+    root.addEventListener('scroll', () => { this.jump.hidden = this.isPinnedToBottom(); });
   }
 
   clear(): void {
@@ -37,6 +47,9 @@ export class MessageList {
     if (this.timer !== null) window.clearTimeout(this.timer);
     this.timer = null;
     this.root.empty();
+    this.groups.length = 0;
+    this.activeGroup = null;
+    this.jump.hidden = true;
   }
 
   update(ids: string[]): void {
@@ -46,8 +59,21 @@ export class MessageList {
       if (!item) continue;
       let el = this.els.get(id);
       if (!el) {
-        el = this.root.createDiv({ cls: `cp-item cp-${item.type}` });
+        if (item.type === 'user') this.activeGroup = null;
+        let parent = this.root;
+        if (item.type === 'tool' || (item.type === 'block' && item.blockType === 'thinking')) {
+          if (!this.activeGroup) {
+            const details = this.root.createEl('details', { cls: 'cp-activity-group' });
+            this.activeGroup = { root: details.createDiv({ cls: 'cp-activity-body' }), summary: details.createEl('summary'), ids: new Set() };
+            details.prepend(this.activeGroup.summary);
+            this.groups.push(this.activeGroup);
+          }
+          this.activeGroup.ids.add(id);
+          parent = this.activeGroup.root;
+        }
+        el = parent.createDiv({ cls: `cp-item cp-${item.type}` });
         this.els.set(id, el);
+        if (item.type === 'footer') this.activeGroup = null;
       }
       if (item.type === 'block' && item.blockType === 'text' && item.streaming) {
         this.schedule(id); // 스트리밍 중 마크다운 재렌더는 100ms당 1회
@@ -56,7 +82,13 @@ export class MessageList {
         this.render(item, el);
       }
     }
+    for (const group of this.groups) {
+      group.summary.empty();
+      inlineIcon(group.summary, 'workflow');
+      group.summary.createSpan({ text: activitySummary([...group.ids].map(id => this.ctx.state.get(id)!).filter(Boolean)) });
+    }
     if (pinned) this.scrollToBottom();
+    else this.jump.hidden = false;
   }
 
   /** 마크다운을 떼어 낸 요소에 렌더한 뒤 교체한다 (깜박임·경합 방지). 실패하면 일반 텍스트. */
@@ -69,7 +101,11 @@ export class MessageList {
     const target = createDiv();
     MarkdownRenderer.render(this.ctx.app, markdown, target, '', component)
       .then(() => {
-        if (this.renderers.get(key) === component) el.replaceChildren(target);
+        if (this.renderers.get(key) === component) {
+          const pinned = this.isPinnedToBottom();
+          el.replaceChildren(target);
+          if (pinned) this.scrollToBottom();
+        }
       })
       .catch(() => {
         if (this.renderers.get(key) === component) el.setText(markdown);
@@ -98,8 +134,21 @@ export class MessageList {
         return this.renderUser(item, el);
       case 'block':
         if (item.blockType === 'text') {
-          el.addClass('markdown-rendered');
-          this.renderMarkdown(el, item.text, item.id);
+          let body = el.querySelector<HTMLElement>('.cp-response-body');
+          if (!body) {
+            body = el.createDiv({ cls: 'cp-response-body markdown-rendered' });
+            const actions = el.createDiv({ cls: 'cp-response-actions' });
+            const copy = actions.createEl('button', { text: '복사', attr: { 'aria-label': '응답 복사' } });
+            buttonIcon(copy, 'copy', '응답 복사');
+            copy.addEventListener('click', () => {
+              const current = this.ctx.state.get(item.id);
+              if (current?.type !== 'block') return;
+              void navigator.clipboard.writeText(current.text).then(() => buttonIcon(copy, 'check', '복사됨')).catch(() => buttonIcon(copy, 'circle-alert', '복사 실패 · 다시 시도'));
+            });
+          }
+          const copy = el.querySelector<HTMLButtonElement>('.cp-response-actions button');
+          if (copy) copy.disabled = item.streaming || !item.text;
+          this.renderMarkdown(body, item.text, item.id);
         } else {
           this.renderThinking(item, el);
         }
@@ -148,7 +197,8 @@ export class MessageList {
     const summary = details.createEl('summary');
     summary.createSpan({ cls: 'cp-tool-name', text: item.name });
     summary.createSpan({ cls: 'cp-tool-summary', text: toolSummary(item.name, item.input, this.ctx.vaultPath) });
-    summary.createSpan({ cls: `cp-tool-status cp-status-${item.status}`, text: STATUS_ICON[item.status] });
+    const status = summary.createSpan({ cls: `cp-tool-status cp-status-${item.status}`, attr: { 'aria-label': { running: '실행 중', done: '완료', error: '오류', cancelled: '중단됨' }[item.status] } });
+    inlineIcon(status, STATUS_ICON[item.status]);
     const body = details.createDiv({ cls: 'cp-tool-body' });
     for (const detail of toolDetails(item.name, item.input, item.output)) {
       if (detail.kind === 'diff') {
@@ -190,5 +240,6 @@ export class MessageList {
 
   private scrollToBottom(): void {
     this.root.scrollTop = this.root.scrollHeight;
+    this.jump.hidden = true;
   }
 }
